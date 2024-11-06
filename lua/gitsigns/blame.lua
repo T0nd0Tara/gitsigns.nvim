@@ -7,6 +7,8 @@ local api = vim.api
 
 local hash_colors = {} --- @type table<integer,string>
 
+local blame_wins = {} --- @type integer[]
+
 local ns = api.nvim_create_namespace('gitsigns_blame_win')
 local ns_hl = api.nvim_create_namespace('gitsigns_blame_win_hl')
 
@@ -266,14 +268,28 @@ local function menu(name, items)
   end
 end
 
+--- @param opts table|nil Additional options:
+---     • {toggle}: (boolean)
+---       Open and close the current blame window
+---     • {stay}: (boolean)
+---       Cursor should stay on the current window
 --- @async
-M.blame = function()
+M.blame = function(opts)
   local __FUNC__ = 'blame'
   local bufnr = api.nvim_get_current_buf()
   local win = api.nvim_get_current_win()
   local bcache = cache[bufnr]
   if not bcache then
     log.dprint('Not attached')
+    return
+  end
+
+  opts = opts or {}
+
+  if opts.toggle and #blame_wins > 0 then
+    for _, blame_win in ipairs(blame_wins) do
+      api.nvim_win_close(blame_win, true)
+    end
     return
   end
 
@@ -284,10 +300,14 @@ M.blame = function()
   local top = vim.fn.line('w0') + vim.wo.scrolloff
   local current = vim.fn.line('.')
 
-  vim.cmd.vsplit({ mods = { keepalt = true, split = 'aboveleft' } })
-  local blm_win = api.nvim_get_current_win()
-
   local blm_bufnr = api.nvim_create_buf(false, true)
+
+  local blm_win = api.nvim_open_win(blm_bufnr, not opts.stay, {
+    split = 'left',
+    win = win,
+  })
+  table.insert(blame_wins, blm_win)
+
   api.nvim_win_set_buf(blm_win, blm_bufnr)
 
   render(blame, blm_win, win, bcache.git_obj.revision)
@@ -409,6 +429,13 @@ M.blame = function()
       api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
       if api.nvim_win_is_valid(win) then
         cur_wlo.foldenable, cur_wlo.scrollbind, cur_wlo.wrap = unpack(cur_orig_wlo)
+
+        for blm_win_ind, blm_win_it in ipairs(blame_wins) do
+          if blm_win_it == blm_win then
+            table.remove(blame_wins, blm_win_ind)
+            break
+          end
+        end
       end
     end,
   })
